@@ -1,0 +1,32 @@
+[package]
+name = "next-proxies-pod"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[dependencies]
+anyhow = "1.0.94"
+chrono = "0.4.39"
+clap = { version = "4.5.23", features = ["derive"] }
+parking_lot = "0.12.3"
+portpicker = "0.1.1"
+prost = "0.13.4"
+regex = "1.11.1"
+reqwest = { version = "0.12.9", features = ["json"] }
+serde = { version = "1.0.216", features = ["derive"] }
+serde_derive = "1.0.216"
+serde_json = "1.0.134"
+temp-dir = "0.1.14"
+temp-file = "0.1.9"
+tokio = { version = "1.42.0", features = [
+  "full",
+  "rt",
+  "macros",
+  "rt-multi-thread",
+] }
+tonic = "0.12.3"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
+
+[build-dependencies]
+tonic-build = "0.12.3"
