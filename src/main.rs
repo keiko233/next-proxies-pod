@@ -4,7 +4,7 @@ use process::ProcessManager;
 use std::time::Duration;
 use tokio::signal;
 use tokio::task;
-use tracing::{error, info};
+use tracing::{error, info, debug};
 
 mod api;
 mod config;
@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             match v2ray_api.query_all_stats(true).await {
                 Ok(stats) => {
-                    info!("Stats query result: {:?}", stats);
+                    debug!("Stats query result: {:?}", stats);
                     fetch.post_stats(stats).await.unwrap();
                     info!("Stats posted successfully!");
                 }
