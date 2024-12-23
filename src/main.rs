@@ -56,12 +56,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         loop {
             interval.tick().await;
-            config.fetch().await.unwrap();
+            if let Err(e) = config.fetch().await {
+                error!("Error fetching config: {}", e);
+                continue;
+            }
 
             match v2ray_api.query_all_stats(true).await {
                 Ok(stats) => {
                     debug!("Stats query result: {:?}", stats);
-                    fetch.post_stats(stats).await.unwrap();
+                    if let Err(e) = fetch.post_stats(stats).await {
+                        error!("Error posting stats: {}", e);
+                        continue;
+                    }
                     info!("Stats posted successfully!");
                 }
                 Err(e) => error!("Error during gRPC query: {}", e),
