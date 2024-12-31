@@ -1,0 +1,196 @@
+name: Build
+
+on:
+  push:
+    paths-ignore: ["**.md"]
+    branches: [main]
+
+  pull_request:
+    paths-ignore: ["**.md"]
+    branches: [main]
+
+  workflow_dispatch:
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+  CARGO_TERM_COLOR: always
+
+jobs:
+  corss_build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - x86_64-pc-windows-gnu
+          - x86_64-linux-android
+          - aarch64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+          - aarch64-linux-android
+          - arm-unknown-linux-gnueabi
+          - arm-unknown-linux-gnueabihf
+          - arm-unknown-linux-musleabi
+          - arm-unknown-linux-musleabihf
+          - armv7-unknown-linux-gnueabi
+          - armv7-unknown-linux-gnueabihf
+          - armv7-unknown-linux-musleabi
+          - armv7-unknown-linux-musleabihf
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: install toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./"
+          prefix-key: "rust-stable"
+          key: ${{ matrix.target }}
+          shared-key: "release"
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: compile
+        run: cross build --release --target=${{ matrix.target }}
+
+      # - name: pack binary (unix)
+      #   if: ${{ !contains(matrix.target, 'windows') }}
+      #   run: |
+      #     mkdir -p release-${{ matrix.target }}
+      #     cd release-${{ matrix.target }}
+      #     tar -C ../target/${{ matrix.target }}/release -zcf next-proxies-pod-${{ matrix.target }}.tar.gz next-proxies-pod
+
+      # - name: pack binary (windows)
+      #   if: contains(matrix.target, 'windows')
+      #   run: |
+      #     mkdir -p release-${{ matrix.target }}
+      #     cd release-${{ matrix.target }}
+      #     tar -C ../target/${{ matrix.target }}/release -zcf next-proxies-pod-${{ matrix.target }}.tar.gz next-proxies-pod.exe
+
+      # - name: add signature
+      #   run: |
+      #     cd release-${{ matrix.target }}
+      #     sha256sum next-proxies-pod-${{ matrix.target }}.tar.gz > next-proxies-pod-${{ matrix.target }}.sha256
+
+      - name: upload binary (unix)
+        if: ${{ !contains(matrix.target, 'windows') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-proxies-pod-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/next-proxies-pod
+
+      - name: upload binary (windows)
+        if: contains(matrix.target, 'windows')
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-proxies-pod-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/next-proxies-pod.exe
+
+  windows_build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-pc-windows-msvc
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: install toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./"
+          prefix-key: "rust-stable"
+          key: ${{ matrix.target }}
+          shared-key: "release"
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: compile
+        run: cargo build --release --target=${{ matrix.target }}
+
+      # - name: pack
+      #   run: |
+      #     mkdir -p release-${{ matrix.target }}
+      #     cd release-${{ matrix.target }}
+      #     tar -C ../target/${{ matrix.target }}/release/ -zcf next-proxies-pod-${{ matrix.target }}.tar.gz next-proxies-pod.exe
+      #     openssl dgst -sha256 -r next-proxies-pod-${{ matrix.target }}.tar.gz > next-proxies-pod-${{ matrix.target }}.sha256
+
+      - name: upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-proxies-pod-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/next-proxies-pod.exe
+
+  apple_build:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+          - aarch64-apple-ios
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: install toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./"
+          prefix-key: "rust-stable"
+          key: ${{ matrix.target }}
+          shared-key: "release"
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: compile
+        run: cargo build --release --target=${{ matrix.target }}
+
+      # - name: pack
+      #   run: |
+      #     mkdir -p release-${{ matrix.target }}
+      #     cd release-${{ matrix.target }}
+      #     tar -C ../target/${{ matrix.target }}/release/ -zcf next-proxies-pod-${{ matrix.target }}.tar.gz next-proxies-pod
+      #     shasum -a 256 next-proxies-pod-${{ matrix.target }}.tar.gz > next-proxies-pod-${{ matrix.target }}.sha256
+
+      - name: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-proxies-pod-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/next-proxies-pod
