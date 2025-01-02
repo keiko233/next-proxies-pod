@@ -25,6 +25,14 @@ pub struct GuardConfig {
     pub reporting_cycle: u64,
 }
 
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum FetchStatus {
+    Updated,
+    Unchanged,
+    Error(String),
+}
+
 pub struct ConfigManager {
     pub fetch: ServerFetch,
 
@@ -36,6 +44,8 @@ pub struct ConfigManager {
     pub runtime_path: PathBuf,
 
     pub v2ray_api_endpoint: String,
+
+    pub fetch_status: Option<FetchStatus>,
 }
 
 impl ConfigManager {
@@ -52,6 +62,7 @@ impl ConfigManager {
             temp_dir,
             runtime_path,
             v2ray_api_endpoint: format!("localhost:{}", port),
+            fetch_status: None,
         };
         config.fetch().await.unwrap();
 
@@ -65,16 +76,26 @@ impl ConfigManager {
 
         let _ = self.prepare();
 
-        let runtime_str = serde_json::to_string(&self.config.clone().unwrap().runtime)?;
+        let new_runtime_str = serde_json::to_string(&self.config.as_ref().unwrap().runtime)?;
 
-        match std::fs::write(&self.runtime_path, runtime_str) {
+        if let Ok(old_runtime_str) = std::fs::read_to_string(&self.runtime_path) {
+            if old_runtime_str == new_runtime_str {
+                self.fetch_status = Some(FetchStatus::Unchanged);
+                info!("Runtime configuration unchanged, skipping save.");
+                return Ok(());
+            }
+        }
+
+        match std::fs::write(&self.runtime_path, new_runtime_str) {
             Ok(_) => {
+                self.fetch_status = Some(FetchStatus::Updated);
                 info!(
-                    "Runtime configuration successful saved to: {}",
+                    "Runtime configuration successfully saved to: {}",
                     self.runtime_path.display()
                 );
             }
             Err(e) => {
+                self.fetch_status = Some(FetchStatus::Error(e.to_string()));
                 error!("Failed to update runtime configuration: {}", e);
             }
         }
