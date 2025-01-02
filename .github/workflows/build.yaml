@@ -65,6 +65,9 @@ jobs:
       - name: install cross
         run: cargo install cross --git https://github.com/cross-rs/cross
 
+      - name: install vendored openssl
+        run: cargo add openssl --features vendored
+
       - name: compile
         run: cross build --release --target=${{ matrix.target }}
 
