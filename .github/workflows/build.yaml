@@ -26,10 +26,10 @@ jobs:
           - x86_64-unknown-linux-gnu
           - x86_64-unknown-linux-musl
           - x86_64-pc-windows-gnu
-          - x86_64-linux-android
+          # - x86_64-linux-android
           - aarch64-unknown-linux-gnu
           - aarch64-unknown-linux-musl
-          - aarch64-linux-android
+          # - aarch64-linux-android
           # - arm-unknown-linux-gnueabi
           # - arm-unknown-linux-gnueabihf
           # - arm-unknown-linux-musleabi
@@ -56,11 +56,6 @@ jobs:
           prefix-key: "rust-stable"
           key: ${{ matrix.target }}
           shared-key: "release"
-
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: install cross
         run: cargo install cross --git https://github.com/cross-rs/cross
