@@ -129,6 +129,38 @@ impl ProcessManager {
         Ok(())
     }
 
+    pub async fn reload(&self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            // https://github.com/SagerNet/sing-box/commit/88469d4aaa3eff427bd5a719a3132dbedfabcc32
+            let lock = self.child.lock().unwrap();
+            if let Some(child) = lock.as_ref() {
+                if let Some(id) = child.id() {
+                    use nix::sys::signal::{Signal, kill};
+                    use nix::unistd::Pid;
+                    let pid = Pid::from_raw(id as i32);
+                    // Send SIGHUP signal to trigger reload
+                    if let Err(e) = kill(pid, Signal::SIGHUP) {
+                        error!("Failed to send SIGHUP to sing-box: {}", e);
+                        return Err(io::Error::new(io::ErrorKind::Other, e));
+                    }
+                    info!("Sent reload signal to sing-box");
+                    return Ok(());
+                }
+            }
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "No running sing-box process found",
+            ))
+        }
+        #[cfg(not(unix))]
+        {
+            // For non-unix systems, not supported, stop and start the service instead of reload
+            self.stop().await?;
+            self.start().await
+        }
+    }
+
     pub fn is_running(&self) -> bool {
         let lock = self.child.lock().unwrap();
         if let Some(child) = lock.as_ref() {
