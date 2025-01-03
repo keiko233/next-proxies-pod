@@ -188,9 +188,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let manager_arc = Arc::new(manager);
 
-    // Initialize V2Ray API
+    // Initialize V2Ray API with retry
     let v2ray_api_endpoint = format!("http://{}", config.v2ray_api_endpoint);
-    let v2ray_api = V2rayApi::new(v2ray_api_endpoint).await?;
+    let mut v2ray_api = None;
+    for _ in 0..5 {
+        match V2rayApi::new(v2ray_api_endpoint.clone()).await {
+            Ok(api) => {
+                v2ray_api = Some(api);
+                break;
+            }
+            Err(_) => {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    }
+    let v2ray_api = v2ray_api.ok_or("Failed to connect to V2Ray API after 5 attempts")?;
 
     // Run reporting tasks concurrently (producer + consumer)
     let reporting_handle = spawn_reporting_tasks(
