@@ -26,7 +26,15 @@ impl ProcessManager {
 
     /// Starts the sing-box process.
     pub async fn start(&self) -> io::Result<()> {
-        let mut child = Command::new("sing-box")
+        let current_dir_singbox = std::env::current_dir()?.join("sing-box");
+        
+        let mut command = if current_dir_singbox.exists() {
+            Command::new(current_dir_singbox)
+        } else {
+            Command::new("sing-box")
+        };
+
+        let mut child = command
             .args(&["run", "-c", self.config_path.to_str().unwrap()])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
