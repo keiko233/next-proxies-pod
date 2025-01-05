@@ -982,6 +982,7 @@ dependencies = [
  "tonic-build",
  "tracing",
  "tracing-subscriber",
+ "winapi",
 ]
 
 [[package]]

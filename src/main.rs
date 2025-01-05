@@ -167,7 +167,7 @@ async fn setup_process_manager(
 }
 
 async fn shutdown_manager(manager: &ProcessManager) {
-    if manager.is_running() {
+    if manager.is_running().await {
         if let Err(e) = manager.stop().await {
             error!("Error stopping sing-box: {}", e);
         }

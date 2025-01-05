@@ -28,6 +28,7 @@ tokio = { version = "1.42.0", features = [
 tonic = "0.12.3"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
+winapi = { version = "0.3.9", features = ["processthreadsapi"] }
 
 [build-dependencies]
 tonic-build = "0.12.3"

@@ -3,14 +3,13 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 #[derive(Clone)]
 pub struct ProcessManager {
-    /// Use tokio::sync::Mutex to ensure thread-safe access in an async environment.
-    pub child: Arc<Mutex<Option<Child>>>,
+    pid: Arc<Mutex<Option<u32>>>,
     config_path: PathBuf,
     logout: Option<bool>,
 }
@@ -18,7 +17,7 @@ pub struct ProcessManager {
 impl ProcessManager {
     pub fn new(config_path: PathBuf, logout: Option<bool>) -> Self {
         Self {
-            child: Arc::new(Mutex::new(None)),
+            pid: Arc::new(Mutex::new(None)),
             config_path,
             logout,
         }
@@ -27,7 +26,7 @@ impl ProcessManager {
     /// Starts the sing-box process.
     pub async fn start(&self) -> io::Result<()> {
         let current_dir_singbox = std::env::current_dir()?.join("sing-box");
-        
+
         let mut command = if current_dir_singbox.exists() {
             Command::new(current_dir_singbox)
         } else {
@@ -42,14 +41,14 @@ impl ProcessManager {
 
         info!("sing-box process started");
 
+        let pid = child.id();
+        {
+            let mut pid_guard = self.pid.lock().await;
+            *pid_guard = pid;
+        }
+
         let stdout = child.stdout.take().expect("Failed to take stdout");
         let stderr = child.stderr.take().expect("Failed to take stderr");
-
-        {
-            // Lock the mutex asynchronously to store the Child
-            let mut guard = self.child.lock().await;
-            *guard = Some(child);
-        }
 
         // Copy logout value for logging tasks
         let logout = self.logout;
@@ -85,20 +84,23 @@ impl ProcessManager {
             debug!("stderr_task finished reading");
         });
 
-        // Background task to wait for the child process to exit
-        let child_ref = self.child.clone();
+        // -------------------------------------------------------------------------
+        // Background task that periodically checks if the child is still alive
+        // without calling .take() or .wait().
+        // -------------------------------------------------------------------------
+        let child_arc = Arc::new(Mutex::new(Some(child)));
+        let pid_ref = self.pid.clone();
         tokio::spawn(async move {
-            // Take the process handle out of the mutex to wait on it
-            let maybe_child = child_ref.lock().await.take();
-            if let Some(mut ch) = maybe_child {
+            // hold the unique ownership of child
+            let mut guard = child_arc.lock().await;
+            if let Some(mut ch) = guard.take() {
                 match ch.wait().await {
-                    Ok(status) => {
-                        info!("sing-box process exited with status: {}", status);
-                    }
-                    Err(e) => {
-                        error!("Failed to wait on sing-box: {}", e);
-                    }
+                    Ok(status) => info!("sing-box process exited with status: {}", status),
+                    Err(e) => error!("Failed to wait on sing-box: {}", e),
                 }
+                // process has exited, clean up the PID
+                let mut pid_guard = pid_ref.lock().await;
+                *pid_guard = None;
             }
         });
 
@@ -107,76 +109,84 @@ impl ProcessManager {
 
     /// Stops the sing-box process.
     pub async fn stop(&self) -> io::Result<()> {
-        let mut guard = self.child.lock().await;
-        if let Some(child) = guard.as_mut() {
+        let pid = *self.pid.lock().await;
+        if let Some(pid) = pid {
+            info!("Stopping sing-box process (pid={}) ...", pid);
+
             #[cfg(unix)]
             {
-                // Send SIGTERM on Unix
                 use nix::sys::signal::{Signal, kill};
                 use nix::unistd::Pid;
-                if let Some(id) = child.id() {
-                    let pid = Pid::from_raw(id as i32);
-                    let _ = kill(pid, Signal::SIGTERM);
-                }
+                let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
             }
 
-            // Wait for the process to exit
-            match child.wait().await {
-                Ok(status) => {
-                    info!("sing-box process exited with status: {}", status);
-                }
-                Err(e) => {
-                    error!("Failed to wait on sing-box: {}", e);
+            #[cfg(windows)]
+            {
+                // use Windows native API TerminateProcess
+                use winapi::um::handleapi::CloseHandle;
+                use winapi::um::processthreadsapi::{OpenProcess, TerminateProcess};
+                use winapi::um::winnt::PROCESS_TERMINATE;
+
+                unsafe {
+                    let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+                    if handle.is_null() {
+                        error!("OpenProcess failed (PID={}), maybe it's already gone.", pid);
+                    } else {
+                        if TerminateProcess(handle, 1) == 0 {
+                            error!(
+                                "TerminateProcess failed, last_error={}",
+                                std::io::Error::last_os_error()
+                            );
+                        } else {
+                            info!("TerminateProcess success for PID={}", pid);
+                        }
+                        CloseHandle(handle);
+                    }
                 }
             }
-
-            *guard = None;
+        } else {
+            info!("stop() called, but no sing-box process is running");
         }
+
         Ok(())
     }
 
     /// Reloads sing-box by sending a SIGHUP signal on Unix systems.
     /// For non-Unix, it stops and restarts the process.
+    #[cfg(unix)]
     pub async fn reload(&self) -> io::Result<()> {
-        #[cfg(unix)]
-        {
-            let guard = self.child.lock().await;
-            if let Some(child) = guard.as_ref() {
-                if let Some(id) = child.id() {
-                    use nix::sys::signal::{Signal, kill};
-                    use nix::unistd::Pid;
-                    let pid = Pid::from_raw(id as i32);
-                    // Send SIGHUP to trigger reload on Unix
-                    if let Err(e) = kill(pid, Signal::SIGHUP) {
-                        error!("Failed to send SIGHUP to sing-box: {}", e);
-                        return Err(io::Error::new(io::ErrorKind::Other, e));
-                    }
-                    info!("Sent reload signal to sing-box");
-                    return Ok(());
+        let pid = *self.pid.lock().await;
+        if let Some(pid) = pid {
+            {
+                use nix::sys::signal::{Signal, kill};
+                use nix::unistd::Pid;
+                if let Err(e) = kill(Pid::from_raw(pid as i32), Signal::SIGHUP) {
+                    error!("Failed to send SIGHUP: {}", e);
+                    return Err(io::Error::new(io::ErrorKind::Other, e));
                 }
+                info!("Sent reload signal (SIGHUP) to sing-box");
+                Ok(())
             }
-            return Err(io::Error::new(
+        } else {
+            Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 "No running sing-box process found",
-            ));
-        }
-        #[cfg(not(unix))]
-        {
-            // For non-Unix platforms, reload is not supported. Stop and then start again.
-            self.stop().await?;
-            self.start().await
+            ))
         }
     }
+    /// Reloads sing-box by sending a SIGHUP signal on Unix systems.
+    /// For WIndows, not SIGHUP, use stop + start
+    #[cfg(windows)]
+    pub async fn reload(&self) -> io::Result<()> {
+        info!("Reload on Windows -> stop + start");
+        self.stop().await?;
+        // Add a small delay to ensure the previous process is fully stopped
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        self.start().await
+    }
 
-    /// Checks if sing-box is running.
-    ///
-    /// Using `try_lock()` to avoid blocking; returns false if the mutex is currently locked.
-    /// If you need guaranteed accuracy in async context, change to an async fn using `lock().await`.
-    pub fn is_running(&self) -> bool {
-        if let Ok(guard) = self.child.try_lock() {
-            guard.as_ref().map(|c| c.id().is_some()).unwrap_or(false)
-        } else {
-            false
-        }
+    pub async fn is_running(&self) -> bool {
+        let pid = *self.pid.lock().await;
+        pid.is_some()
     }
 }
