@@ -20,6 +20,9 @@ struct Args {
 
     #[arg(long)]
     auth: String,
+
+    #[arg(long, default_value = "info")]
+    log_level: String,
 }
 
 fn parse_args() -> Args {
@@ -176,10 +179,19 @@ async fn shutdown_manager(manager: &ProcessManager) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    tracing_subscriber::fmt::init();
-
-    // Initialize components
     let args = parse_args();
+
+    let level = match args.log_level.to_lowercase().as_str() {
+        "trace" => tracing::Level::TRACE,
+        "debug" => tracing::Level::DEBUG,
+        "info" => tracing::Level::INFO,
+        "warn" => tracing::Level::WARN,
+        "error" => tracing::Level::ERROR,
+        _ => tracing::Level::INFO,
+    };
+    tracing_subscriber::fmt().with_max_level(level).init();
+    
+    // Initialize components
     let fetch = api::server::ServerFetch::new(args.url, args.auth);
     let config = config::ConfigManager::new(fetch.clone()).await;
 
@@ -205,12 +217,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let v2ray_api = v2ray_api.ok_or("Failed to connect to V2Ray API after 5 attempts")?;
 
     // Run reporting tasks concurrently (producer + consumer)
-    let reporting_handle = spawn_reporting_tasks(
-        config,
-        fetch,
-        v2ray_api,
-        Arc::clone(&manager_arc),
-    );
+    let reporting_handle =
+        spawn_reporting_tasks(config, fetch, v2ray_api, Arc::clone(&manager_arc));
 
     // Wait for shutdown signal
     tokio::select! {

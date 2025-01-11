@@ -2,6 +2,7 @@ use super::v2ray_api::StatsFormatResponse;
 use crate::config::ConfigResponse;
 use reqwest::{Client, header::HeaderMap};
 use std::error::Error;
+use tracing::info;
 
 #[derive(Debug, Clone)]
 pub struct ServerFetch {
@@ -41,10 +42,7 @@ impl ServerFetch {
         }
     }
 
-    pub async fn post_stats(
-        &mut self,
-        stats: StatsFormatResponse,
-    ) -> Result<(), Box<dyn Error>> {
+    pub async fn post_stats(&mut self, stats: StatsFormatResponse) -> Result<(), Box<dyn Error>> {
         let response = self
             .client
             .post(&self.url)
@@ -54,7 +52,10 @@ impl ServerFetch {
             .await?;
 
         match response.status().is_success() {
-            true => Ok(()),
+            true => {
+                info!("Stats response: {:?}", response.text().await?);
+                Ok(())
+            }
             false => Err("Error posting stats".into()),
         }
     }
